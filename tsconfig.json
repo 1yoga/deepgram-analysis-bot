@@ -8,6 +8,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["bot", "jobs", "db", "trigger.ts"],
+  "include": [
+    "src/bot",
+    "src/trigger/jobs",
+    "src/db",
+    "trigger.ts",
+    "trigger.config.ts"
+  ],
   "exclude": ["node_modules"]
 }
