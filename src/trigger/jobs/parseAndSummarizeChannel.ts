@@ -161,8 +161,8 @@ async function parseQuery({
                 }
             });
 
-            for (let i = 0; i < actuallyInserted.length; i += 100) {
-                const batch = actuallyInserted.slice(i, i + 100);
+            for (let i = 0; i < insertedUsers.length; i += 100) {
+                const batch = insertedUsers.slice(i, i + 100);
 
                 try {
                     await summarizeUserBatch.trigger({ users: batch });
