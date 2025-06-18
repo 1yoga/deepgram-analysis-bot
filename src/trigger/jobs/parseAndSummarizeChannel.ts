@@ -108,51 +108,30 @@ async function parseQuery({
 
             if (!(res instanceof Api.channels.ChannelParticipants)) break;
 
-            const newUsers = res.users
-                .filter((u): u is Api.User => u instanceof Api.User)
-
+            const newUsers = res.users.filter((u): u is Api.User => u instanceof Api.User);
             logger.info(`📦 Получено пользователей: ${newUsers.length}`, { q, offset });
 
-            const userProfileBatch: any[] = [];
-            const channelMemberBatch: any[] = [];
-            const insertedUsers: { userId: number; username: string | null }[] = [];
+            const userProfileBatch = newUsers.map((u) => ({
+                user_id: BigInt(u.id.toJSNumber()),
+                username: u.username ?? null,
+                first_name: u.firstName ?? null,
+                last_name: u.lastName ?? null,
+            }));
 
-            for (const u of newUsers) {
-                const userId = u.id.toJSNumber();
+            const channelMemberBatch = newUsers.map((u) => ({
+                channel_id: channelId,
+                user_id: BigInt(u.id.toJSNumber()),
+            }));
 
-                userProfileBatch.push({
-                    user_id: BigInt(userId),
-                    username: u.username ?? null,
-                    first_name: u.firstName ?? null,
-                    last_name: u.lastName ?? null,
-                });
-
-                channelMemberBatch.push({
-                    channel_id: channelId,
-                    user_id: BigInt(userId),
-                });
-
-                insertedUsers.push({ userId, username: u.username ?? null });
-            }
-
-            // Храним реально вставленных пользователей
-            const actuallyInserted: { userId: number; username: string | null }[] = [];
+            const insertedUsers = newUsers.map((u) => ({
+                userId: u.id.toJSNumber(),
+                username: u.username ?? null,
+            }));
 
             await db.transaction(async (tx) => {
                 for (let i = 0; i < userProfileBatch.length; i += INSERT_BATCH_SIZE) {
                     const batch = userProfileBatch.slice(i, i + INSERT_BATCH_SIZE);
-                    const inserted = await tx
-                        .insert(userProfiles)
-                        .values(batch)
-                        .onConflictDoNothing()
-                        .returning();
-
-                    for (const row of inserted) {
-                        actuallyInserted.push({
-                            userId: Number(row.user_id),
-                            username: row.username ?? null,
-                        });
-                    }
+                    await tx.insert(userProfiles).values(batch).onConflictDoNothing();
                 }
 
                 for (let i = 0; i < channelMemberBatch.length; i += INSERT_BATCH_SIZE) {
@@ -172,7 +151,6 @@ async function parseQuery({
                 }
             }
 
-            // Только теперь добавляем в seen и считаем found
             for (const u of insertedUsers) {
                 seen.add(u.userId);
                 found++;
@@ -191,4 +169,5 @@ async function parseQuery({
 
     return { found, shouldUseBigrams };
 }
+
 
