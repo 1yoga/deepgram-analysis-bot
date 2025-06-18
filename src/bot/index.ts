@@ -1,31 +1,27 @@
-import { Telegraf, Markup } from "telegraf";
+import {Context, Telegraf} from "telegraf";
 import { config } from "dotenv";
+import { session } from "telegraf";
 config();
 
-import { onboardingHandler } from "./handlers/onboarding";
-import { checkChannelHandler } from "./handlers/checkChannel";
-import {handlePayment} from "./handlers/payment";
+import { onboardingHandler } from "../handlers/onboarding";
+import { checkChannelHandler } from "../handlers/checkChannel";
+import { handleSuccessfulPayment } from "../handlers/payment";
+import { checkConnectionHandler } from "../handlers/checkConnection";
+import {BotContext, SessionData} from "../types/session";
 
-const bot = new Telegraf(process.env.BOT_TOKEN!);
+const bot = new Telegraf<BotContext>(process.env.BOT_TOKEN!);
+import { configure } from "@trigger.dev/sdk/v3";
+
+configure({
+    secretKey: process.env.TRIGGER_SECRET_KEY!,
+});
+
+bot.use(session({ defaultSession: (): SessionData => ({}) }) as any);
 
 bot.start(onboardingHandler);
 bot.on("text", checkChannelHandler);
-bot.on("pre_checkout_query", (ctx) => {
-    ctx.answerPreCheckoutQuery(true);
-});
-
-bot.on("successful_payment", async (ctx) => {
-    const payload = ctx.message.successful_payment?.invoice_payload;
-    const orderId = parseInt(payload, 10);
-    if (!orderId) return;
-
-    await markOrderAsPaid(orderId);
-
-    // ✅ Запуск анализа (Trigger, очередь, вручную)
-    await analyzeChannelByOrder(orderId); // или вызов trigger.dev
-
-    await ctx.reply("✅ Оплата прошла! Анализ начался, это займёт 1–3 часа.");
-});
-bot.hears("✅ Оплатить", handlePayment);
+bot.on("pre_checkout_query", (ctx) => ctx.answerPreCheckoutQuery(true));
+bot.on("successful_payment", handleSuccessfulPayment);
+bot.action("check_connection", checkConnectionHandler);
 
 bot.launch().then(() => console.log("🤖 Bot started"));

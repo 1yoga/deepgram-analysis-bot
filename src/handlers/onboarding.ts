@@ -1,11 +1,12 @@
 import { Context } from "telegraf";
-import { Markup } from "telegraf";
+import { upsertUser } from "../db/queries/users";
 
 export const onboardingHandler = async (ctx: Context) => {
+    await upsertUser(ctx);
+
     await ctx.reply(
-        `👋 Привет! Я — *Deepgram Bot*.\n\n` +
+        `👋 Привет! Я — Deepgram Bot.\n` +
         `Я помогу провести AI-анализ подписчиков вашего канала и отправлю подробный отчет.\n\n` +
-        `Нажмите кнопку ниже, чтобы начать.`,
-        Markup.keyboard([["🚀 Start"]]).resize()
+        `Введите @username канала, чтобы начать.`
     );
 };
