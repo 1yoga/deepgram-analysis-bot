@@ -24,7 +24,24 @@ export const UserProfileSchema = z.object({
 });
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
-const limit = pLimit(5);
+const limit = pLimit(20);
+const chLimit = pLimit(5);
+
+async function safeCH<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        } catch (err: any) {
+            if (err.message?.includes("Timeout") && i < retries - 1) {
+                logger.warn("🔁 Retry ClickHouse after timeout", { try: i + 1 });
+                await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+                continue;
+            }
+            throw err;
+        }
+    }
+    throw new Error("ClickHouse failed after retries");
+}
 
 export const summarizeUserBatch = task({
     id: "summarize-user-batch",
@@ -59,7 +76,7 @@ function limitStructuredInput(rows: { channel_name: string; text: string }[], ma
     return result;
 }
 
-async function summarizeOneUser({ userId }: { userId: number; }) {
+async function summarizeOneUser({ userId }: { userId: number }) {
     try {
         const existing = await db.query.userProfiles.findFirst({
             where: eq(userProfiles.user_id, BigInt(userId)),
@@ -69,16 +86,20 @@ async function summarizeOneUser({ userId }: { userId: number; }) {
             return;
         }
 
-        const rows = (await ch.query({
-            query: `
-        SELECT text, c.channel_name
-        FROM default.messages m
-        LEFT JOIN default.channels c ON m.channel_id = c.id
-        WHERE m.user_id = ${userId} AND length(text) > 10
-        LIMIT 1000
-      `,
-            format: "JSONEachRow",
-        }).then((r) => r.json())) as { text: string; channel_name: string }[];
+        const rows = await safeCH(() =>
+            chLimit(() =>
+                ch.query({
+                    query: `
+                        SELECT text, c.channel_name
+                        FROM default.messages m
+                        LEFT JOIN default.channels c ON m.channel_id = c.id
+                        WHERE m.user_id = ${userId} AND length(text) > 10
+                        LIMIT 1000
+                    `,
+                    format: "JSONEachRow",
+                }).then((r) => r.json())
+            )
+        ) as { text: string; channel_name: string }[];
 
         if (!rows.length) {
             await db.update(userProfiles)
@@ -100,7 +121,7 @@ async function summarizeOneUser({ userId }: { userId: number; }) {
 - Никогда не пиши "unknown" — всегда делай обоснованное предположение.
 - Все значения должны быть на **русском языке**.
 - Ответ строго в формате JSON по заданной схеме.
-          `,
+          `.trim(),
                 },
                 { role: "user", content: structuredInput },
             ],
@@ -129,6 +150,7 @@ async function summarizeOneUser({ userId }: { userId: number; }) {
             .where(eq(userProfiles.user_id, BigInt(userId)));
 
         logger.info("✅ Сохранили профиль", { userId });
+
     } catch (err) {
         logger.error("🔥 Ошибка в summarizeOneUser", { userId, error: err });
     }
