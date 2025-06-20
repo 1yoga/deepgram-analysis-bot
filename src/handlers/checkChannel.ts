@@ -23,6 +23,8 @@ export const checkChannelHandler = async (ctx: Context & { session?: any }) => {
 
     const userId = BigInt(ctx.from!.id);
 
+    const chatId = BigInt(ctx.chat!.id);
+
     try {
         const client = await getTelegramClient();
         const entity = await client.getEntity(username);

@@ -26,6 +26,9 @@ export const channels = pgTable("channels", {
     members_count: integer("members_count"),
     is_public: boolean("is_public").default(true),
     created_at: timestamp("created_at").defaultNow(),
+    parsing_complete: boolean("parsing_complete").default(false),
+    report_text: text("report_text"), // итоговый текст отчета от GPT
+    report_generated_at: timestamp("report_generated_at"), // когда был сгенерирован
 });
 
 // 3. Заказы
@@ -45,6 +48,7 @@ export const orders = pgTable("orders", {
     status: text("status").default("pending"), // pending | paid | processing | done
     created_at: timestamp("created_at").defaultNow(),
     paid_at: timestamp("paid_at"),
+    telegram_chat_id: bigint("telegram_chat_id", { mode: "bigint" }),
 });
 
 // 4. Профили подписчиков

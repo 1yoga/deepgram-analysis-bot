@@ -10,8 +10,8 @@ import { z } from "zod";
 import pLimit from "p-limit";
 
 export const UserProfileSchema = z.object({
-    gender: z.enum(["male", "female", "unknown"]),
-    age_group: z.enum(["18-24", "25-34", "35+", "unknown"]),
+    gender: z.enum(["male", "female"]),
+    age_group: z.enum(["18-24", "25-34", "35+"]),
     country: z.string().nullable().default(""),
     language: z.string().nullable().default(""),
     interests: z.array(z.string()),
@@ -34,7 +34,7 @@ async function safeCH<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
         } catch (err: any) {
             if (err.message?.includes("Timeout") && i < retries - 1) {
                 logger.warn("🔁 Retry ClickHouse after timeout", { try: i + 1 });
-                await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+                await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
                 continue;
             }
             throw err;
@@ -46,76 +46,62 @@ async function safeCH<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
 export const summarizeUserBatch = task({
     id: "summarize-user-batch",
     run: async (
-        payload: { users: { userId: number; username: string | null }[] },
+        payload: { users: { userId: number; username: string | null }[]; channelId: bigint },
         { ctx }
     ) => {
-        logger.info("🚀 Запуск батч-саммаризации", { count: payload.users.length });
+        const { users, channelId } = payload;
+        const userIds = users.map((u) => u.userId);
+        logger.info("🚀 Запуск batch-саммаризации", { count: userIds.length });
 
-        const tasks = payload.users.map(({ userId }) =>
-            limit(() => summarizeOneUser({ userId }))
-        );
-
-        await Promise.allSettled(tasks);
-
-        logger.info("✅ Саммаризация батча завершена");
-    },
-});
-
-function limitStructuredInput(rows: { channel_name: string; text: string }[], maxTokens = 8000) {
-    const result: { channel: string; text: string }[] = [];
-    let total = 0;
-
-    for (const row of rows) {
-        const item = { channel: row.channel_name, text: row.text };
-        const tokens = encode(JSON.stringify(item)).length;
-        if (total + tokens > maxTokens) break;
-        result.push(item);
-        total += tokens;
-    }
-
-    return result;
-}
-
-async function summarizeOneUser({ userId }: { userId: number }) {
-    try {
-        const existing = await db.query.userProfiles.findFirst({
-            where: eq(userProfiles.user_id, BigInt(userId)),
-        });
-
-        if (existing?.summarization_status === "done" || existing?.summarization_status === "no_data") {
-            return;
-        }
-
-        const rows = await safeCH(() =>
+        // 1. Загружаем все сообщения
+        const messages = await safeCH(() =>
             chLimit(() =>
                 ch.query({
                     query: `
-                        SELECT text, c.channel_name
-                        FROM default.messages m
-                        LEFT JOIN default.channels c ON m.channel_id = c.id
-                        WHERE m.user_id = ${userId} AND length(text) > 10
-                        LIMIT 1000
-                    `,
+            SELECT m.user_id, m.text, c.channel_name
+            FROM default.messages m
+            LEFT JOIN default.channels c ON m.channel_id = c.id
+            WHERE m.user_id IN (${userIds.join(",")}) AND length(m.text) > 10
+            LIMIT 100000
+          `,
                     format: "JSONEachRow",
                 }).then((r) => r.json())
             )
-        ) as { text: string; channel_name: string }[];
+        ) as { user_id: number | string; text: string; channel_name: string }[];
 
-        if (!rows.length) {
-            await db.update(userProfiles)
-                .set({ summarization_status: "no_data", summarized_at: new Date() })
-                .where(eq(userProfiles.user_id, BigInt(userId)));
-            return;
+        logger.info("📨 Сообщения получены", {
+            total: messages.length,
+            users: new Set(messages.map((m) => m.user_id)).size,
+        });
+
+        // 2. Группируем по user_id (строково!)
+        const grouped = new Map<string, { text: string; channel_name: string }[]>();
+        for (const row of messages) {
+            const key = String(row.user_id);
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key)!.push(row);
         }
 
-        const structuredInput = JSON.stringify(limitStructuredInput(rows), null, 2);
+        // 3. Саммаризуем в параллель
+        const results = await Promise.allSettled(
+            userIds.map((userId) =>
+                limit(async () => {
+                    const rows = grouped.get(String(userId)) || [];
+                    if (!rows.length) {
+                        await db.update(userProfiles)
+                            .set({ summarization_status: "no_data", summarized_at: new Date() })
+                            .where(eq(userProfiles.user_id, BigInt(userId)));
+                        return;
+                    }
 
-        const parsed = await openai.beta.chat.completions.parse({
-            model: "gpt-4.1-nano",
-            messages: [
-                {
-                    role: "system",
-                    content: `
+                    const structuredInput = JSON.stringify(limitStructuredInput(rows), null, 2);
+
+                    const parsed = await openai.beta.chat.completions.parse({
+                        model: "gpt-4.1-nano",
+                        messages: [
+                            {
+                                role: "system",
+                                content: `
 Ты — опытный AI-аналитик. По сообщениям пользователя из Telegram нужно обязательно определить его пол, возрастную группу и другие параметры. 
 Обязательные требования:
 - Никогда не пиши "unknown" — всегда делай обоснованное предположение.
@@ -136,36 +122,55 @@ async function summarizeOneUser({ userId }: { userId: number }) {
 - persona_probability — от 0 до 1.
 - summary — 2–3 предложения с итогом.
           `.trim(),
-                },
-                { role: "user", content: structuredInput },
-            ],
-            response_format: zodResponseFormat(UserProfileSchema, "user_profile"),
+                            },
+                            { role: "user", content: structuredInput },
+                        ],
+                        response_format: zodResponseFormat(UserProfileSchema, "user_profile"),
+                    });
+
+                    const profile = parsed.choices[0].message.parsed!;
+                    await db.update(userProfiles)
+                        .set({
+                            gender: profile.gender,
+                            age_group: profile.age_group,
+                            country: profile.country,
+                            language: profile.language,
+                            interests: profile.interests,
+                            tone: profile.tone,
+                            language_level: profile.language_level,
+                            likely_profession: profile.likely_profession,
+                            persona_cluster: profile.persona_cluster,
+                            persona_probability: profile.persona_probability,
+                            summary: profile.summary,
+                            is_summarized: true,
+                            summarization_status: "done",
+                            summarized_at: new Date(),
+                        })
+                        .where(eq(userProfiles.user_id, BigInt(userId)));
+
+                    logger.info("✅ Сохранили профиль", { userId });
+                })
+            )
+        );
+
+        logger.info("✅ Саммаризация батча завершена", {
+            success: results.filter((r) => r.status === "fulfilled").length,
+            failed: results.filter((r) => r.status === "rejected").length,
         });
+    },
+});
 
-        const profile = parsed.choices[0].message.parsed!;
+function limitStructuredInput(rows: { channel_name: string; text: string }[], maxTokens = 8000) {
+    const result: { channel: string; text: string }[] = [];
+    let total = 0;
 
-        await db.update(userProfiles)
-            .set({
-                gender: profile.gender,
-                age_group: profile.age_group,
-                country: profile.country,
-                language: profile.language,
-                interests: profile.interests,
-                tone: profile.tone,
-                language_level: profile.language_level,
-                likely_profession: profile.likely_profession,
-                persona_cluster: profile.persona_cluster,
-                persona_probability: profile.persona_probability,
-                summary: profile.summary,
-                is_summarized: true,
-                summarization_status: "done",
-                summarized_at: new Date(),
-            })
-            .where(eq(userProfiles.user_id, BigInt(userId)));
-
-        logger.info("✅ Сохранили профиль", { userId });
-
-    } catch (err) {
-        logger.error("🔥 Ошибка в summarizeOneUser", { userId, error: err });
+    for (const row of rows) {
+        const item = { channel: row.channel_name, text: row.text };
+        const tokens = encode(JSON.stringify(item)).length;
+        if (total + tokens > maxTokens) break;
+        result.push(item);
+        total += tokens;
     }
+
+    return result;
 }

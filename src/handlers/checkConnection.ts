@@ -1,7 +1,7 @@
 import { Context } from "telegraf";
 import { getTelegramClient } from "../telegram/client";
 import { Api } from "telegram";
-import { parseAndSummarizeChannel } from "../trigger/jobs/parseAndSummarizeChannel";
+import { startChannelAnalysis } from "../trigger/jobs/startChannelAnalysis";
 
 export const checkConnectionHandler = async (ctx: Context & { session?: any }) => {
     await ctx.answerCbQuery(); // Снимаем "часики"
@@ -23,7 +23,6 @@ export const checkConnectionHandler = async (ctx: Context & { session?: any }) =
 
         const myAccount = await client.getMe();
 
-        // 👇 Пытаемся получить информацию о себе в канале
         const participantInfo = await client.invoke(
             new Api.channels.GetParticipant({
                 channel: entity,
@@ -46,11 +45,19 @@ export const checkConnectionHandler = async (ctx: Context & { session?: any }) =
         }
 
         const channelId = BigInt(entity.id.toString());
+        const chatId = ctx.chat?.id;
 
-        await ctx.reply("✅ Подключение подтверждено. Начинаем анализ подписчиков...");
-        await parseAndSummarizeChannel.trigger({
+        if (!chatId) {
+            await ctx.reply("❌ Не удалось определить chat ID.");
+            return;
+        }
+
+        await ctx.reply(`✅ Наш аккаунт @${process.env.TELEGRAM_USERNAME} добавлен в админы. Начинаем анализ подписчиков...`);
+
+        await startChannelAnalysis.trigger({
             channelId,
             channelUsername,
+            chatId,
         });
 
     } catch (err: any) {
