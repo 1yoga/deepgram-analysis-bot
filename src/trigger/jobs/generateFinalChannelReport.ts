@@ -293,7 +293,10 @@ async function sendProfilesCSV(chatId: number, channelId: bigint, channelUsernam
         })
         .from(userProfiles)
         .innerJoin(channelMembers, eq(userProfiles.user_id, channelMembers.user_id))
-        .where(eq(channelMembers.channel_id, channelId));
+        .where(and(
+            eq(channelMembers.channel_id, channelId),
+            eq(userProfiles.summarization_status, "done")
+        ));
 
     const records = rows.map(r => ({
         ...r,
