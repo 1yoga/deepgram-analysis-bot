@@ -4,6 +4,7 @@ import { Api } from "telegram";
 import { StringSession } from "telegram/sessions";
 import bigInt from "big-integer";
 import { promises as fs } from "fs";
+import { bigrams } from "../bigrams";
 
 import { db } from "../../db/client";
 import { userProfiles, channelMembers, channels } from "../../db/schema";
@@ -29,7 +30,6 @@ export const parseMembersTask = task({
 
         const client = await getTelegramClient();
         const entity = await client.getEntity(`@${channelUsername}`);
-        const bigrams: string[] = JSON.parse(await fs.readFile("./bigrams.json", "utf8"));
         const seen = new Set<number>();
 
         if (!(entity instanceof Api.Channel)) throw new Error("Не является каналом");
