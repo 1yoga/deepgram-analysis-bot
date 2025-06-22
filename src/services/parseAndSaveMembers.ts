@@ -2,7 +2,7 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { Api } from "telegram";
 import bigInt from "big-integer";
-import { promises as fs } from "fs";
+import { bigrams } from "../trigger/bigrams";
 import { db } from "../db/client";
 import { userProfiles, channelMembers } from "../db/schema";
 
@@ -20,7 +20,6 @@ const BIGRAM_LIMIT = Number(process.env.BIGRAM_LIMIT ?? 20);
 export async function parseAndSaveMembers(channelId: bigint, channelUsername: string) {
     const client = await getTelegramClient();
     const entity = await client.getEntity(`@${channelUsername}`);
-    const bigrams: string[] = JSON.parse(await fs.readFile("./bigrams.json", "utf8"));
     const seen = new Set<number>();
 
     if (!(entity instanceof Api.Channel)) throw new Error("Не является каналом");
