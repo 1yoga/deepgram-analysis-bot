@@ -5,7 +5,7 @@
     "dev": "ts-node-dev src/bot/index.ts",
     "trigger": "ts-node-dev trigger.ts",
     "build": "tsc",
-    "start": "node dist/bot/index.js"
+    "start": "node dist/bot/index.js && node dist/trigger/index.js"
   },
   "dependencies": {
     "@clickhouse/client": "^1.11.2",
