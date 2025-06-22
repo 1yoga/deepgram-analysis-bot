@@ -4,6 +4,9 @@ import { db } from "../../db/client";
 import { channels, userProfiles, channelMembers } from "../../db/schema";
 import {eq, and, desc, sql, isNull} from "drizzle-orm";
 import axios from "axios";
+import fs from "fs/promises";
+import { stringify } from "csv-stringify/sync";
+import FormData from "form-data";
 
 export const generateFinalChannelReport = task({
     id: "generate-final-channel-report",
@@ -191,6 +194,8 @@ ${interestStats.map((i, idx) => `${idx + 1}. ${i.group}: ${percent(i.c)}`).join(
 
         await sendLongMessage(chatId, finalText);
 
+        await sendProfilesCSV(chatId, channelId, channel.username);
+
         const updated = await db.update(channels)
             .set({
                 report_text: finalText,
@@ -273,3 +278,45 @@ function mapGender(gender: string | null): string {
     return gender;
 }
 
+async function sendProfilesCSV(chatId: number, channelId: bigint, channelUsername: string) {
+    const rows = await db
+        .select({
+            user_id: userProfiles.user_id,
+            username: userProfiles.username,
+            gender: userProfiles.gender,
+            age_group: userProfiles.age_group,
+            country: userProfiles.country,
+            language: userProfiles.language,
+            interests: userProfiles.interests,
+            tone: userProfiles.tone,
+            summary: userProfiles.summary,
+        })
+        .from(userProfiles)
+        .innerJoin(channelMembers, eq(userProfiles.user_id, channelMembers.user_id))
+        .where(eq(channelMembers.channel_id, channelId));
+
+    const records = rows.map(r => ({
+        ...r,
+        interests: r.interests?.join(", ") ?? "",
+    }));
+
+    const csv = stringify(records, { header: true });
+
+    const filePath = `/tmp/${channelUsername}_profiles.csv`;
+    await fs.writeFile(filePath, csv, "utf8");
+
+    const form = new FormData();
+    form.append("chat_id", chatId);
+    form.append("document", await fs.readFile(filePath), {
+        filename: `${channelUsername}_profiles.csv`,
+        contentType: "text/csv",
+    });
+
+    await axios.post(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendDocument`, form, {
+        headers: form.getHeaders(),
+    });
+
+    logger.info("📎 CSV-файл отправлен");
+
+    await fs.unlink(filePath); // удалить временный файл
+}
