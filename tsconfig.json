@@ -2,18 +2,13 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "commonjs",
-    "rootDir": ".",
+    "rootDir": "src",
     "outDir": "dist",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "moduleResolution": "node"
   },
-  "include": [
-    "src/bot",
-    "src/trigger/jobs",
-    "src/db",
-    "trigger.ts",
-    "trigger.config.ts"
-  ],
+  "include": ["src/**/*"],
   "exclude": ["node_modules"]
 }
