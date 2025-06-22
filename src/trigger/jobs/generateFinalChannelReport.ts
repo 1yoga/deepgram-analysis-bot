@@ -301,9 +301,9 @@ async function sendProfilesCSV(chatId: number, channelId: bigint, channelUsernam
     }));
 
     const csv = stringify(records, { header: true });
-
+    const bom = "\uFEFF"; // Excel-friendly UTF-8 BOM
     const filePath = `/tmp/${channelUsername}_profiles.csv`;
-    await fs.writeFile(filePath, csv, "utf8");
+    await fs.writeFile(filePath, bom + csv, "utf8");
 
     const form = new FormData();
     form.append("chat_id", chatId);
