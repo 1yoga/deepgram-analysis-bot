@@ -163,7 +163,7 @@ export const summarizeUserBatch = task({
     },
 });
 
-function limitStructuredInput(rows: { channel_name: string; text: string }[], maxTokens = 8000) {
+function limitStructuredInput(rows: { channel_name: string; text: string }[], maxTokens = 4000) {
     const result: { channel: string; text: string }[] = [];
     let total = 0;
 
