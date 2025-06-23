@@ -1,8 +1,17 @@
 import { Context } from "telegraf";
 import { upsertUser } from "../db/queries/users";
+import {posthog} from "../posthog";
 
 export const onboardingHandler = async (ctx: Context) => {
     await upsertUser(ctx);
+    posthog.capture({
+        distinctId: ctx.from!.id.toString(),
+        event: "start_bot",
+        properties: {
+            username: ctx.from?.username,
+            first_name: ctx.from?.first_name,
+        },
+    });
 
     await ctx.reply(
         `👋 Привет! Я — Deepgram Bot.\n` +

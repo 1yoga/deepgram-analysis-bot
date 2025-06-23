@@ -3,8 +3,8 @@ import { getTelegramClient } from "../telegram/client";
 import { upsertUser } from "../db/queries/users";
 import { upsertChannel } from "../db/queries/channels";
 import { createOrder } from "../db/queries/orders";
-import { calculatePrice } from "../services/price";
 import { Api } from "telegram";
+import {posthog} from "../posthog";
 
 export const checkChannelHandler = async (ctx: Context & { session?: any }) => {
     const message = ctx.message;
@@ -22,8 +22,6 @@ export const checkChannelHandler = async (ctx: Context & { session?: any }) => {
     ctx.session.channelUsername = username;
 
     const userId = BigInt(ctx.from!.id);
-
-    const chatId = BigInt(ctx.chat!.id);
 
     try {
         const client = await getTelegramClient();
@@ -54,7 +52,7 @@ export const checkChannelHandler = async (ctx: Context & { session?: any }) => {
 
         const channelId = BigInt(entity.id.toString());
         const members = fullChat.participantsCount ?? 0;
-        const price = 1 // calculatePrice(members);
+        const price = calculatePrice(members);
 
         await upsertUser(ctx);
         await upsertChannel({
@@ -66,6 +64,14 @@ export const checkChannelHandler = async (ctx: Context & { session?: any }) => {
         });
 
         const orderId = await createOrder(userId, channelId, price);
+        posthog.capture({
+            distinctId: ctx.from!.id.toString(),
+            event: "check_channel",
+            properties: {
+                channel: username,
+                members,
+            },
+        });
 
         await ctx.replyWithInvoice({
             title: `AI-анализ канала @${username}`,
@@ -81,3 +87,10 @@ export const checkChannelHandler = async (ctx: Context & { session?: any }) => {
         await ctx.reply("❌ Не удалось получить информацию о канале.");
     }
 };
+
+function calculatePrice(members: number): number {
+    if (members <= 10_000) return 5000;
+
+    const extra = Math.ceil((members - 10_000) / 10_000);
+    return 5000 + extra * 5000;
+}

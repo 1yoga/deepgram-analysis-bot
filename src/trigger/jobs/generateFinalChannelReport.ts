@@ -7,6 +7,7 @@ import axios from "axios";
 import fs from "fs/promises";
 import { stringify } from "csv-stringify/sync";
 import FormData from "form-data";
+import {posthog} from "../../posthog";
 
 export const generateFinalChannelReport = task({
     id: "generate-final-channel-report",
@@ -213,6 +214,14 @@ ${interestStats.map((i, idx) => `${idx + 1}. ${i.group}: ${percent(i.c)}`).join(
         }
 
         logger.info("✅ Финальный отчёт сгенерирован и сохранён", { channelId });
+        posthog.capture({
+            distinctId: String(chatId),
+            event: "report_generated",
+            properties: {
+                channelId: String(channelId),
+                channelUsername: channel.username,
+            },
+        });
     }
 });
 

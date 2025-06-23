@@ -2,6 +2,7 @@ import { Context } from "telegraf";
 import { getTelegramClient } from "../telegram/client";
 import { Api } from "telegram";
 import { startChannelAnalysis } from "../trigger/jobs/startChannelAnalysis";
+import {posthog} from "../posthog";
 
 export const checkConnectionHandler = async (ctx: Context & { session?: any }) => {
     await ctx.answerCbQuery(); // Снимаем "часики"
@@ -53,6 +54,14 @@ export const checkConnectionHandler = async (ctx: Context & { session?: any }) =
         }
 
         await ctx.reply(`✅ Наш аккаунт @${process.env.TELEGRAM_USERNAME} добавлен в админы. Начинаем анализ подписчиков...`);
+
+        posthog.capture({
+            distinctId: ctx.from!.id.toString(),
+            event: "agent_added",
+            properties: {
+                channel: channelUsername,
+            },
+        });
 
         await startChannelAnalysis.trigger({
             channelId,

@@ -1,5 +1,6 @@
 import { Context } from "telegraf";
 import { markOrderAsPaid } from "../db/queries/orders";
+import {posthog} from "../posthog";
 
 export const handleSuccessfulPayment = async (ctx: Context) => {
     const message = ctx.message;
@@ -12,6 +13,14 @@ export const handleSuccessfulPayment = async (ctx: Context) => {
     if (!orderId) return;
 
     await markOrderAsPaid(orderId);
+
+    posthog.capture({
+        distinctId: ctx.from!.id.toString(),
+        event: "payment_successful",
+        properties: {
+            orderId,
+        },
+    });
 
     await ctx.reply(
         `✅ Оплата прошла успешно!\n\n` +
