@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "ts-node-dev src/bot/index.ts",
     "trigger": "ts-node-dev trigger.ts",
-    "build": "tsc",
+    "build": "tsc && copyfiles -u 1 src/assets/* dist/assets",
     "start": "node dist/bot/index.js"
   },
   "dependencies": {
